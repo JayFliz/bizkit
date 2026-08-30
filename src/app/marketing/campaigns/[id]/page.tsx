@@ -5,6 +5,7 @@ import { redirect, notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { SendCampaignButton } from "@/components/marketing/send-campaign-button";
 import { formatDate } from "@/lib/utils";
 
 const statusVariant: Record<string, "default" | "info" | "warning" | "success" | "danger"> = {
@@ -59,13 +60,18 @@ export default async function CampaignDetailPage(props: PageProps<"/marketing/ca
         &larr; Back to Campaigns
       </Link>
 
-      <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          {campaign.name}
-        </h1>
-        <Badge variant={statusVariant[campaign.status] ?? "default"}>
-          {campaign.status}
-        </Badge>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
+            {campaign.name}
+          </h1>
+          <Badge variant={statusVariant[campaign.status] ?? "default"}>
+            {campaign.status}
+          </Badge>
+        </div>
+        {campaign.status === "draft" && (
+          <SendCampaignButton campaignId={campaign.id} />
+        )}
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
