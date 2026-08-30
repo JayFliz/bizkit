@@ -3,44 +3,39 @@ set -euo pipefail
 
 SERVER="ubuntu@35.179.187.63"
 KEY="$HOME/.ssh/helpdesk.pem"
-APP_DIR="/home/bizkit/app"
+REPO="https://github.com/JayFliz/bizkit.git"
 
-echo "=== Step 1: Syncing bizkit to server ==="
-rsync -avz --exclude node_modules --exclude .next --exclude '.git' --exclude 'data/*.db' \
-  -e "ssh -i $KEY" \
-  "$(dirname "$0")/" "$SERVER:/tmp/bizkit/"
-
-echo "=== Step 2: Setting up on server ==="
-ssh -i "$KEY" "$SERVER" bash -s <<'REMOTE'
+echo "=== Deploying bizkit from $REPO ==="
+ssh -i "$KEY" "$SERVER" bash -s <<REMOTE
 set -euo pipefail
 
 APP_DIR="/home/bizkit/app"
 
-# Move app into place
-sudo rm -rf "$APP_DIR"
-sudo mv /tmp/bizkit "$APP_DIR"
-sudo chown -R bizkit:bizkit "$APP_DIR"
+# Clone fresh from repo
+sudo rm -rf "\$APP_DIR"
+sudo -u bizkit git clone $REPO "\$APP_DIR"
+cd "\$APP_DIR"
 
 # Write .env from SSM secrets (reusing helpdesk keys)
-RESEND_API_KEY=$(aws ssm get-parameter --region eu-west-2 --name "/helpdesk/resend-api-key" --with-decryption --query 'Parameter.Value' --output text)
-SESSION_SECRET=$(aws ssm get-parameter --region eu-west-2 --name "/helpdesk/session-secret" --with-decryption --query 'Parameter.Value' --output text)
+RESEND_API_KEY=\$(aws ssm get-parameter --region eu-west-2 --name "/helpdesk/resend-api-key" --with-decryption --query 'Parameter.Value' --output text)
+SESSION_SECRET=\$(aws ssm get-parameter --region eu-west-2 --name "/helpdesk/session-secret" --with-decryption --query 'Parameter.Value' --output text)
 
-sudo -u bizkit tee "$APP_DIR/.env" > /dev/null <<EOF
+sudo -u bizkit tee "\$APP_DIR/.env" > /dev/null <<EOF
 NODE_ENV=production
-SESSION_SECRET=$SESSION_SECRET
-RESEND_API_KEY=$RESEND_API_KEY
+SESSION_SECRET=\$SESSION_SECRET
+RESEND_API_KEY=\$RESEND_API_KEY
 RESEND_FROM=Bizkit <bizkit@fliz.co.uk>
 EOF
-sudo chmod 600 "$APP_DIR/.env"
+sudo chmod 600 "\$APP_DIR/.env"
 
 # Install, seed, build
-cd "$APP_DIR"
 sudo -u bizkit npm ci
+sudo -u bizkit mkdir -p data
 sudo -u bizkit npm run db:seed
 sudo -u bizkit npm run build
 
 # pm2 ecosystem (single Next.js process)
-sudo -u bizkit tee "$APP_DIR/ecosystem.config.cjs" > /dev/null <<'PMEOF'
+sudo -u bizkit tee "\$APP_DIR/ecosystem.config.cjs" > /dev/null <<'PMEOF'
 module.exports = {
   apps: [{
     name: 'bizkit',
@@ -54,7 +49,7 @@ PMEOF
 
 # Stop any existing pm2 processes, start fresh
 sudo -u bizkit pm2 delete all 2>/dev/null || true
-sudo -u bizkit pm2 start "$APP_DIR/ecosystem.config.cjs"
+sudo -u bizkit pm2 start "\$APP_DIR/ecosystem.config.cjs"
 sudo -u bizkit pm2 save
 
 # nginx config
@@ -65,13 +60,13 @@ server {
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
     }
 }
 NGEOF
